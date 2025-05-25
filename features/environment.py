@@ -2,7 +2,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
 
-def before_scenario(context):
+def before_scenario(context, scenario):
     # Настройка Chrome
     chrome_options = Options()
     # chrome_options.add_argument("--headless=new")  # добавить, чтобы прогонять тесты без включения браузера
@@ -18,6 +18,6 @@ def before_scenario(context):
     context.driver.implicitly_wait(10)
 
 
-def after_scenario(context):
+def after_scenario(context, scenario):
     # Закрытие браузера после сценария
     context.driver.quit()
