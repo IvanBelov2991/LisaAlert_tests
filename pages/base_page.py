@@ -9,6 +9,9 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.wait import WebDriverWait
 from typing import List, Tuple
+from PIL import Image
+from pixelmatch.contrib.PIL import pixelmatch
+import io
 
 
 class BasePage:
@@ -254,3 +257,312 @@ class BasePage:
         target_element = self.wait_and_find_element(target_locator)
         ActionChains(self.driver).drag_and_drop(source_element, target_element).perform()
     # endregion
+
+    @allure.step('Нажать клавишу "{key}"')
+    def press_key(self, key: str) -> None:
+        """Нажимает клавишу (например, Keys.ENTER)"""
+        ActionChains(self.driver).send_keys(key).perform()
+
+    @allure.step('Ввести текст "{text}" с клавиатуры')
+    def type_text(self, text: str) -> None:
+        """Вводит текст с клавиатуры (имитация набора)"""
+        ActionChains(self.driver).send_keys(text).perform()
+
+    @allure.step('Переключиться на новую вкладку')
+    def switch_to_new_tab(self, close_current: bool = False) -> None:
+        """Переключается на новую вкладку"""
+        if close_current:
+            self.driver.close()
+        handles = self.driver.window_handles
+        self.driver.switch_to.window(handles[-1])
+
+    @allure.step('Закрыть текущую вкладку')
+    def close_current_tab(self) -> None:
+        """Закрывает текущую вкладку"""
+        self.driver.close()
+        self.switch_to_new_tab()
+
+    @allure.step('Переключиться на iframe')
+    def switch_to_iframe(self, locator: Tuple[str, str]) -> None:
+        """Переключается на iframe по локатору"""
+        iframe = self.wait_and_find_element(locator)
+        self.driver.switch_to.frame(iframe)
+
+    @allure.step('Вернуться из iframe')
+    def switch_to_default_content(self) -> None:
+        """Возвращается из iframe в основной контент"""
+        self.driver.switch_to.default_content()
+
+    @allure.step('Выполнить JavaScript: "{script}"')
+    def execute_js(self, script: str, *args) -> any:
+        """Выполняет JavaScript-код и возвращает результат"""
+        return self.driver.execute_script(script, *args)
+
+    @allure.step('Проскроллить к элементу')
+    def scroll_to_element(self, locator: Tuple[str, str]) -> None:
+        """Скроллит страницу к указанному элементу"""
+        element = self.wait_and_find_element(locator)
+        self.execute_js("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", element)
+
+    @allure.step('Проскроллить страницу вниз')
+    def scroll_page_down(self, pixels: int = 500) -> None:
+        """Скроллит страницу вниз на указанное количество пикселей"""
+        self.execute_js(f"window.scrollBy(0, {pixels});")
+
+    @allure.step('Проскроллить страницу вверх')
+    def scroll_page_up(self, pixels: int = 500) -> None:
+        """Скроллит страницу вверх на указанное количество пикселей"""
+        self.execute_js(f"window.scrollBy(0, -{pixels});")
+
+    @allure.step('Навести курсор на элемент')
+    def hover_element(self, locator: Tuple[str, str], timeout: int = None) -> None:
+        """
+        Наводит курсор мыши на указанный элемент.
+
+        Args:
+            locator: Кортеж (By.XXX, 'значение') для поиска элемента
+            timeout: Время ожидания элемента (по умолчанию из self.timeout)
+        """
+        element = self.wait_and_find_element(locator, timeout)
+        ActionChains(self.driver).move_to_element(element).perform()
+
+    @allure.step('Навести курсор на элемент с ID "{element_id}"')
+    def hover_element_by_id(self, element_id: str, timeout: int = None) -> None:
+        locator = (By.ID, element_id)
+        self.hover_element(locator, timeout)
+
+    @allure.step('Навести курсор на элемент с классом "{class_name}"')
+    def hover_element_by_class(self, class_name: str, timeout: int = None) -> None:
+        locator = (By.CLASS_NAME, class_name)
+        self.hover_element(locator, timeout)
+
+    @allure.step('Навести курсор на элемент с data-component="{component_name}"')
+    def hover_element_by_data_component(self, component_name: str, timeout: int = None) -> None:
+        locator = (By.CSS_SELECTOR, f'[data-component="{component_name}"]')
+        self.hover_element(locator, timeout)
+
+    @allure.step('Проверить, что элемент активен')
+    def is_element_active(self, locator: Tuple[str, str], timeout: int = None) -> bool:
+        """
+        Проверяет, что элемент:
+        1. Видим на странице
+        2. Не имеет атрибута 'disabled'
+        3. Ширина/высота > 0 (опционально)
+
+        Args:
+            locator: Кортеж (By.XXX, 'значение')
+            timeout: Время ожидания элемента
+
+        Returns:
+            bool: True если элемент активен, False если нет
+        """
+        try:
+            element = self.wait_and_find_element(locator, timeout)
+            return (
+                    element.is_displayed()
+                    and element.is_enabled()
+                    and element.size['width'] > 0
+                    and element.size['height'] > 0
+            )
+        except (NoSuchElementException, TimeoutException, StaleElementReferenceException):
+            return False
+
+    @allure.step('Проверить, что элемент неактивен')
+    def is_element_disabled(self, locator: Tuple[str, str], timeout: int = None) -> bool:
+        """
+        Проверяет, что элемент:
+        1. Имеет атрибут 'disabled' ИЛИ
+        2. Неактивен через .is_enabled() ИЛИ
+        3. Скрыт (опционально)
+
+        Args:
+            locator: Кортеж (By.XXX, 'значение')
+            timeout: Время ожидания элемента
+
+        Returns:
+            bool: True если элемент неактивен, False если активен
+        """
+        try:
+            element = self.wait_and_find_element(locator, timeout)
+            return (
+                    not element.is_enabled()
+                    or element.get_attribute("disabled") is not None
+                    or not element.is_displayed()
+            )
+        except (NoSuchElementException, TimeoutException):
+            return True  # Элемент не найден = считается неактивным
+
+    @allure.step('Проверить, что кнопка активна')
+    def is_button_active(self, locator: Tuple[str, str], timeout: int = None) -> bool:
+        """Специализированная проверка для button/input[type='button']"""
+        return self.is_element_active(locator, timeout)
+
+    @allure.step('Проверить, что кнопка неактивна')
+    def is_button_disabled(self, locator: Tuple[str, str], timeout: int = None) -> bool:
+        """Специализированная проверка для button/input[type='button']"""
+        return self.is_element_disabled(locator, timeout)
+
+    @allure.step("Сделать скриншот страницы")
+    def take_screenshot(self, screenshot_name: str = "screenshot") -> Image.Image:
+        """
+        Делает скриншот текущей страницы и возвращает объект PIL.Image.
+
+        Args:
+            screenshot_name: Название для сохранения в отчете Allure
+
+        Returns:
+            PIL.Image: Объект изображения
+        """
+        screenshot_bytes = self.driver.get_screenshot_as_png()
+        allure.attach(
+            screenshot_bytes,
+            name=screenshot_name,
+            attachment_type=allure.attachment_type.PNG
+        )
+        return Image.open(io.BytesIO(screenshot_bytes))
+
+    @allure.step("Сделать скриншот элемента {locator}")
+    def take_element_screenshot(
+            self,
+            locator: Tuple[str, str],
+            screenshot_name: str = "element_screenshot"
+    ) -> Image.Image:
+        """
+        Делает скриншот конкретного элемента.
+
+        Args:
+            locator: Локатор элемента (By.XPATH, By.CSS_SELECTOR и т.д.)
+            screenshot_name: Название для отчета Allure
+
+        Returns:
+            PIL.Image: Объект изображения элемента
+        """
+        element = self.wait_and_find_element(locator)
+        screenshot_bytes = element.screenshot_as_png
+        allure.attach(
+            screenshot_bytes,
+            name=screenshot_name,
+            attachment_type=allure.attachment_type.PNG
+        )
+        return Image.open(io.BytesIO(screenshot_bytes))
+
+    @allure.step("Сравнить скриншоты")
+    def compare_screenshots(
+            self,
+            actual_image: Image.Image,
+            expected_image_path: str,
+            threshold: float = 0.1,
+            save_diff: bool = True
+    ) -> bool:
+        """
+        Сравнивает текущий скриншот с эталоном.
+
+        Args:
+            actual_image: Скриншот (PIL.Image)
+            expected_image_path: Путь к эталонному изображению
+            threshold: Допустимый порог различий (0-1)
+            save_diff: Сохранять ли изображение с различиями
+
+        Returns:
+            bool: True если различия в пределах threshold, иначе False
+        """
+        expected_image = Image.open(expected_image_path)
+
+        if actual_image.size != expected_image.size:
+            raise ValueError("Размеры изображений не совпадают!")
+
+        diff = Image.new("RGBA", actual_image.size)
+        mismatch = pixelmatch(
+            actual_image.convert("RGB"),
+            expected_image.convert("RGB"),
+            diff.convert("RGB"),
+            threshold=threshold
+        )
+
+        if save_diff:
+            diff_path = "diff.png"
+            diff.save(diff_path)
+            allure.attach.file(
+                diff_path,
+                name="DIFF: " + os.path.basename(expected_image_path),
+                attachment_type=allure.attachment_type.PNG
+            )
+
+        return mismatch / (actual_image.width * actual_image.height) <= threshold
+
+    @allure.step("Сравнить элемент с эталоном")
+    def compare_element_with_expected(
+            self,
+            locator: Tuple[str, str],
+            expected_image_path: str,
+            threshold: float = 0.1
+    ) -> bool:
+        """
+        Сравнивает элемент с эталонным изображением.
+
+        Args:
+            locator: Локатор элемента
+            expected_image_path: Путь к эталону
+            threshold: Допустимый порог различий
+
+        Returns:
+            bool: True если различия в пределах threshold
+        """
+        actual_image = self.take_element_screenshot(locator)
+        return self.compare_screenshots(actual_image, expected_image_path, threshold)
+
+    @allure.step("Проверить полную загрузку страницы")
+    def wait_for_full_page_load(self, timeout: int = 15) -> bool:
+        """
+        Комплексная проверка полной загрузки страницы
+        """
+        try:
+            # 1. Базовое ожидание готовности документа
+            WebDriverWait(self.driver, timeout).until(
+                lambda d: d.execute_script("return document.readyState") == "complete",
+                message="Документ не перешел в состояние 'complete'"
+            )
+
+            # 2. Проверка завершения AJAX-запросов
+            try:
+                WebDriverWait(self.driver, timeout).until(
+                    lambda d: d.execute_script("""
+                        if (typeof jQuery != 'undefined') return jQuery.active === 0;
+                        if (typeof axios != 'undefined') return axios.activeRequests === 0;
+                        return true;
+                    """),
+                    message="AJAX-запросы не завершились"
+                )
+            except:
+                pass
+
+            # 3. Автопоиск основных структурных элементов
+            structural_elements = [
+                ('body', By.TAG_NAME),
+                ('main, .main, [role="main"]', By.CSS_SELECTOR),
+                ('header, .header', By.CSS_SELECTOR),
+                ('footer, .footer', By.CSS_SELECTOR)
+            ]
+
+            for selector, by in structural_elements:
+                try:
+                    elements = self.driver.find_elements(by, selector)
+                    if elements:
+                        WebDriverWait(self.driver, 5).until(
+                            ec.visibility_of(elements[0]),
+                            message=f"Структурный элемент {selector} не виден"
+                        )
+                except:
+                    continue
+
+            # 4. Проверка стабильности DOM
+            initial_height = self.driver.execute_script("return document.body.scrollHeight")
+            time.sleep(1)
+            current_height = self.driver.execute_script("return document.body.scrollHeight")
+            assert initial_height == current_height, "DOM не стабилен"
+
+            return True
+
+        except Exception as e:
+            self.take_screenshot("page_load_failed")
+            raise AssertionError(f"Ошибка загрузки страницы: {str(e)}")
