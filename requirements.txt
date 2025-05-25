@@ -1,4 +1,7 @@
-selenium
+selenium~=4.32.0
 pytest
 allure-pytest
-behave
+behave~=1.2.6
+allure-python-commons~=2.14.2
+pillow~=11.2.1
+pixelmatch~=0.3.0

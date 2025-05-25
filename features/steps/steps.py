@@ -1,6 +1,8 @@
 import allure
 from behave import given, when, then
 from pages.main_page import MainPage
+import os
+from PIL import Image
 
 
 @given('Открыть страницу "{url}"')
@@ -94,3 +96,62 @@ def step_text_not_present(context, text):
     """
     is_not_present = context.main_page.is_text_not_present(text)
     assert is_not_present, f"Элемент с текстом '{text}' найден на странице, хотя не должен был быть"
+
+
+@then('Скриншот страницы соответствует эталону "{expected_image}" с допуском {threshold:f}')
+def step_compare_screenshot_with_expected(context, expected_image, threshold=0.1):
+    """
+    Сравнивает текущий скриншот страницы с эталонным изображением.
+    При первом запуске создает эталон, если его не существует.
+
+    Примеры:
+      Тогда Скриншот страницы соответствует эталону "main_page.png" с допуском 0.05
+      Тогда Скриншот страницы соответствует эталону "auth_popup.png" с допуском 0.1
+    """
+    # Получаем абсолютный путь к эталону
+    expected_path = os.path.join("screenshots", "expected", expected_image)
+    os.makedirs(os.path.dirname(expected_path), exist_ok=True)
+
+    # Делаем текущий скриншот
+    current_screenshot = context.page.take_screenshot("current_" + expected_image)
+
+    # Если эталона нет - сохраняем текущий скриншот как эталон
+    if not os.path.exists(expected_path):
+        current_screenshot.save(expected_path)
+        context.page.execute_script("alert('Эталонный скриншот сохранен! Повторите тест.');")
+        assert False, f"Эталон {expected_image} создан. Повторите тест для проверки."
+
+    # Сравниваем с эталоном
+    expected_img = Image.open(expected_path)
+    diff_path = os.path.join("screenshots", "diff", expected_image)
+    os.makedirs(os.path.dirname(diff_path), exist_ok=True)
+
+    # Прикрепляем эталон к отчету
+    allure.attach.file(
+        expected_path,
+        name="Ожидаемый скриншот: " + expected_image,
+        attachment_type=allure.attachment_type.PNG
+    )
+
+    # Сравнение
+    result = context.page.compare_screenshots(
+        current_screenshot,
+        expected_path,
+        threshold=threshold,
+        save_diff=True
+    )
+
+    assert result, (
+        f"Визуальные различия превышают порог {threshold}.\n"
+        f"Эталон: {expected_path}\n"
+        f"Diff: {diff_path}"
+    )
+
+
+@then('Пользователь ожидает загрузки всей страницы')
+def step_page_fully_loaded(context):
+    """
+    Пример использования:
+      Тогда Страница полностью загружена
+    """
+    assert context.page.wait_for_full_page_load(timeout=20), "Страница не загрузилась полностью"
